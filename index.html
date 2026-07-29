@@ -630,14 +630,73 @@
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script>
 const STORE_PREFIX = 'cmcc_ybk_';
+const BOOK_ID = 'cm18yb';
+
+let fsReady = false;
+let fsCache = {};
+let authReadyPromise = Promise.resolve(null);
+
+(function initFirebase(){
+  try{
+    const firebaseConfig = {
+      apiKey: "AIzaSyAu8LfEz1c8yAhy4NIjetRkyZmaN8qfT-g",
+      authDomain: "checkmate-yardage-book.firebaseapp.com",
+      projectId: "checkmate-yardage-book",
+      storageBucket: "checkmate-yardage-book.firebasestorage.app",
+      messagingSenderId: "155918852101",
+      appId: "1:155918852101:web:35963956850d7ce8be3c6c"
+    };
+    if(typeof firebase === 'undefined') return;
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    try{ db.enablePersistence({synchronizeTabs:true}).catch(()=>{}); }catch(e){}
+    const bookDocRef = db.collection('books').doc(BOOK_ID);
+    window.__cmccBookRef = bookDocRef;
+
+    authReadyPromise = new Promise((resolve)=>{
+      firebase.auth().onAuthStateChanged(user=>{
+        if(user){
+          fsReady = true;
+          bookDocRef.onSnapshot(snap=>{
+            if(snap.exists) fsCache = snap.data() || {};
+          }, ()=>{});
+          resolve(user);
+        }
+      });
+      firebase.auth().signInAnonymously().catch(()=> resolve(null));
+    });
+  }catch(e){
+    console.error('Firebase init failed', e);
+  }
+})();
+
+function cmccTimeout(ms){
+  return new Promise(resolve => setTimeout(()=>resolve(null), ms));
+}
+async function ensureAuthReady(){
+  try{ await Promise.race([authReadyPromise, cmccTimeout(4000)]); }catch(e){}
+}
+
 const Store = {
   async get(key){
     try{
-      if(window.storage && typeof window.storage.get === 'function'){
-        const res = await window.storage.get(key);
-        if(res) return res;
+      await ensureAuthReady();
+      if(fsReady && window.__cmccBookRef){
+        if(Object.prototype.hasOwnProperty.call(fsCache, key)){
+          return {key, value: fsCache[key]};
+        }
+        const snap = await window.__cmccBookRef.get();
+        if(snap.exists){
+          fsCache = snap.data() || {};
+          if(Object.prototype.hasOwnProperty.call(fsCache, key)){
+            return {key, value: fsCache[key]};
+          }
+        }
       }
     }catch(e){}
     try{
@@ -649,9 +708,11 @@ const Store = {
   async set(key, value){
     let ok = false;
     try{
-      if(window.storage && typeof window.storage.set === 'function'){
-        const res = await window.storage.set(key, value);
-        if(res) ok = true;
+      await ensureAuthReady();
+      if(fsReady && window.__cmccBookRef){
+        await window.__cmccBookRef.set({[key]: value}, {merge:true});
+        fsCache[key] = value;
+        ok = true;
       }
     }catch(e){}
     try{
