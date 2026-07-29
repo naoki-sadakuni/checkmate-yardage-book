@@ -280,7 +280,7 @@
     }
     .tab{
       flex-shrink:0;
-      width:44px;
+      width:32px;
       margin:0 2px 0 auto;
       border-radius:6px;
       border:1px solid var(--line);
@@ -290,9 +290,10 @@
       align-items:center;
       gap:0;
     }
-    .tab .n{ font-size:14px; }
-    .tab .p{ font-size:8px; }
-    .tab.active{ width:48px; }
+    .tab .n{ font-size:13px; }
+    .tab .p{ display:none; }
+    .tab.active{ width:36px; }
+    .rail{ width:40px; }
 
     .page-wrap{
       padding:8px 10px;
@@ -350,7 +351,7 @@
     .toolbar-bottom{ flex-direction:column; align-items:stretch; gap:6px; margin-top:8px; flex-shrink:0; }
     .nav-btns{ flex-wrap:wrap; justify-content:flex-start; gap:6px; }
     .nav-btns button{ flex:1 1 auto; padding:6px 8px; font-size:11px; }
-    .print-btn{ width:100%; text-align:center; padding:7px; font-size:12px; }
+    .print-btn{ display:none; }
   }
   .panel-title{
     font-size:12px;
@@ -584,7 +585,6 @@
             <div class="badge hdcp" id="badgeHdcp">HDCP 9</div>
             <div class="badge yd" id="badgeFB">FB 549Y</div>
             <div class="badge yd" id="badgeB">B 519Y</div>
-            <div class="hole-note" id="holeNote" style="display:none;"></div>
           </div>
 
           <div style="margin-top:20px;">
@@ -594,16 +594,16 @@
               <label style="font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:3px;">
                 幅<input type="number" id="tWidth" value="100" min="6" max="200" step="2" style="width:44px;padding:2px 4px;border:1px solid var(--line);border-radius:4px;">
               </label>
-              <button id="btnStar" title="星を挿入">★ 星</button>
-              <button id="btnCircle" title="○を挿入">○ 丸</button>
+              <button id="btnStar" title="星を挿入">★</button>
+              <button id="btnCircle" title="○を挿入">○</button>
               <label style="font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:3px;">
-                アイコンサイズ<input type="number" id="iconSize" value="2" min="1" max="4" step="0.5" style="width:44px;padding:2px 4px;border:1px solid var(--line);border-radius:4px;">
+                サイズ<input type="number" id="iconSize" value="2" min="1" max="4" step="0.5" style="width:44px;padding:2px 4px;border:1px solid var(--line);border-radius:4px;">
               </label>
               <button class="swatch active" data-color="#241F17" style="background:#241F17;"></button>
               <button class="swatch" data-color="#E8B93A" style="background:#E8B93A;"></button>
               <button class="swatch" data-color="#B8231E" style="background:#B8231E;"></button>
               <button id="btnUndo">戻す</button>
-              <button id="btnReset">イラストをリセット</button>
+              <button id="btnReset">リセット</button>
             </div>
             <canvas id="sketch" width="520" height="560"></canvas>
           </div>
@@ -620,7 +620,6 @@
               <button id="nextHole">次のホール →</button>
               <button id="btnExport" title="全ホールの書き込みをファイルに保存">書き込みを書き出す</button>
               <button id="btnImportTrigger" title="書き出したファイルを読み込む">書き込みを読み込む</button>
-              <button id="btnResetAll" title="全ホールの絵をイラストにリセット（メモ文章は残ります）">全ホールをイラストにリセット</button>
               <input type="file" id="btnImport" accept="application/json" style="display:none;">
             </div>
             <button class="print-btn" id="printBtn">イラスト版を印刷（A4両面・短辺とじ）</button>
@@ -1057,9 +1056,6 @@ async function loadHole(n){
   document.getElementById('badgeHdcp').textContent = 'HDCP ' + h.hdcp;
   document.getElementById('badgeFB').textContent = 'FB ' + h.fb + 'Y';
   document.getElementById('badgeB').textContent = 'B ' + h.b + 'Y';
-  const noteEl = document.getElementById('holeNote');
-  if(h.note){ noteEl.style.display='inline-block'; noteEl.textContent = h.note; }
-  else { noteEl.style.display='none'; }
 
   undoStack = [];
   document.getElementById('notes').value = '';
@@ -1102,6 +1098,30 @@ document.getElementById('nextHole').addEventListener('click', ()=>{
   const next = HOLES[(idx + 1) % 18];
   loadHole(next.n);
 });
+
+// Swipe left/right on the page (outside the drawing canvas) to move between holes.
+(function(){
+  let startX = 0, startY = 0, startTarget = null;
+  document.addEventListener('touchstart', (e)=>{
+    if(e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    startTarget = e.target;
+  }, {passive:true});
+  document.addEventListener('touchend', (e)=>{
+    if(!startTarget) return;
+    if(startTarget.closest && startTarget.closest('#sketch')){ startTarget = null; return; }
+    if(!e.changedTouches || e.changedTouches.length !== 1) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    startTarget = null;
+    if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5){
+      if(dx < 0){ document.getElementById('nextHole').click(); }
+      else { document.getElementById('prevHole').click(); }
+    }
+  }, {passive:true});
+})();
+
 function renderHoleCard(h, imgMap, missingLabel, rotate, notesMap){
   if(!h){
     return `<div class="hole-card hole-card-blank"></div>`;
@@ -1220,7 +1240,6 @@ async function resetAllToIllustration(){
   await loadHole(current);
   alert('全ホールをイラストに戻しました。');
 }
-document.getElementById('btnResetAll').addEventListener('click', resetAllToIllustration);
 
 document.getElementById('btnImportTrigger').addEventListener('click', ()=>{
   document.getElementById('btnImport').click();
