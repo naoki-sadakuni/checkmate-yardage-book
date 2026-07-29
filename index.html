@@ -177,6 +177,7 @@
   }
   .badge.par{background:var(--fairway-l);color:var(--fairway);}
   .badge.hdcp{background:var(--hazard-l);color:var(--hazard);}
+  .badge.yd{background:var(--paper-2);color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;}
   .hole-note{
     font-size:13px;
     color:var(--brass-d);
@@ -253,47 +254,51 @@
     .stat-strip{ display:none; }
     .howto{ display:none; }
 
-    .body-row{ flex-direction:column; min-width:0; width:100%; flex:1; min-height:0; }
+    .body-row{ flex-direction:row; min-width:0; width:100%; flex:1; min-height:0; }
     .rail{
-      width:100%;
-      max-width:100vw;
-      min-width:0;
+      width:52px;
       flex-shrink:0;
       box-sizing:border-box;
       display:flex;
-      flex-direction:row;
-      overflow-x:auto;
+      flex-direction:column;
+      align-items:flex-end;
+      overflow-y:auto;
       -webkit-overflow-scrolling:touch;
-      padding:6px 8px;
-      border-right:none;
-      border-bottom:1px solid var(--line);
-      gap:4px;
+      padding:6px 0;
+      border-right:1px solid var(--line);
+      border-bottom:none;
+      gap:2px;
     }
     .rail-group-label{
-      padding:0 6px;
-      display:flex;
-      align-items:center;
+      padding:4px 0 2px 0;
+      display:block;
+      width:100%;
+      text-align:center;
       flex-shrink:0;
       white-space:nowrap;
-      font-size:9px;
+      font-size:8px;
     }
     .tab{
       flex-shrink:0;
-      width:auto;
-      margin:0;
+      width:44px;
+      margin:0 2px 0 auto;
       border-radius:6px;
-      border-right:1px solid var(--line);
-      padding:4px 8px;
+      border:1px solid var(--line);
+      padding:5px 0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:0;
     }
-    .tab .n{ font-size:13px; }
-    .tab.active{ width:auto; }
+    .tab .n{ font-size:14px; }
+    .tab .p{ font-size:8px; }
+    .tab.active{ width:48px; }
 
     .page-wrap{
       padding:8px 10px;
       min-width:0;
-      width:100%;
-      box-sizing:border-box;
       flex:1;
+      box-sizing:border-box;
       min-height:0;
       overflow-y:auto;
       display:flex;
@@ -313,38 +318,6 @@
     .hole-head{ gap:8px; padding-bottom:6px; margin-bottom:6px; flex-shrink:0; }
     .hole-num{ font-size:24px; }
     .badge{ font-size:10px; padding:3px 7px; }
-
-    /* Yardage table becomes a compact, low-priority strip of chips */
-    table.yard{
-      display:block;
-      width:100%;
-      flex-shrink:0;
-      margin-bottom:8px;
-    }
-    table.yard thead{ display:none; }
-    table.yard tbody{
-      display:flex;
-      flex-wrap:wrap;
-      gap:4px;
-    }
-    table.yard tr{
-      display:flex;
-      align-items:center;
-      gap:4px;
-      border:1px solid var(--line);
-      border-radius:6px;
-      background:var(--card);
-      padding:2px 6px;
-      width:auto;
-    }
-    table.yard td{
-      border:none;
-      padding:0 !important;
-      font-size:10px !important;
-      text-align:left;
-    }
-    table.yard td.tee{ background:transparent; color:var(--ink-soft); }
-    table.yard td.val{ font-size:11px !important; }
 
     /* Course illustration is the priority: let it fill remaining space */
     .page > div[style*="margin-top:20px"]{
@@ -609,15 +582,10 @@
             <div class="hole-num" id="holeNum">1</div>
             <div class="badge par" id="badgePar">PAR 5</div>
             <div class="badge hdcp" id="badgeHdcp">HDCP 9</div>
+            <div class="badge yd" id="badgeFB">FB 549Y</div>
+            <div class="badge yd" id="badgeB">B 519Y</div>
             <div class="hole-note" id="holeNote" style="display:none;"></div>
           </div>
-
-          <table class="yard">
-            <thead>
-              <tr><th style="text-align:left;">ティー</th><th>ヤーデージ</th></tr>
-            </thead>
-            <tbody id="yardBody"></tbody>
-          </table>
 
           <div style="margin-top:20px;">
             <div class="canvas-tools">
@@ -1087,16 +1055,11 @@ async function loadHole(n){
   document.getElementById('holeNum').textContent = h.n;
   document.getElementById('badgePar').textContent = 'PAR ' + h.par;
   document.getElementById('badgeHdcp').textContent = 'HDCP ' + h.hdcp;
+  document.getElementById('badgeFB').textContent = 'FB ' + h.fb + 'Y';
+  document.getElementById('badgeB').textContent = 'B ' + h.b + 'Y';
   const noteEl = document.getElementById('holeNote');
   if(h.note){ noteEl.style.display='inline-block'; noteEl.textContent = h.note; }
   else { noteEl.style.display='none'; }
-
-  document.getElementById('yardBody').innerHTML = `
-    <tr><td class="tee">フルバック</td><td class="val">${h.fb} Y</td></tr>
-    <tr><td class="tee">バック</td><td class="val">${h.b} Y</td></tr>
-    <tr><td class="tee">フロント（レギュラー）</td><td class="val">${h.f} Y</td></tr>
-    <tr><td class="tee">レディース</td><td class="val">${h.l} Y</td></tr>
-  `;
 
   undoStack = [];
   document.getElementById('notes').value = '';
