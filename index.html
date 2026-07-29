@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>チェックメイトカントリークラブ｜手作りヤーデージブック</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#22331E">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CMCC Yardage">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="icon" href="./icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -433,6 +441,10 @@
     margin-top:6px;
     height:14px;
   }
+  .net-badge{
+    margin-left:8px;
+    color:#B8231E;
+  }
   .toolbar-bottom{
     display:flex;
     justify-content:space-between;
@@ -617,7 +629,7 @@
           <div class="notes-area">
             <p class="panel-title">メモ（グリーン形状・ハザードまでの距離・攻め方など）</p>
             <textarea id="notes"></textarea>
-            <div class="save-state" id="saveState"></div>
+            <div class="save-state" id="saveState"><span id="saveText"></span><span class="net-badge" id="netBadge"></span></div>
           </div>
 
           <div class="toolbar-bottom">
@@ -685,6 +697,7 @@ function cmccTimeout(ms){
   return new Promise(resolve => setTimeout(()=>resolve(null), ms));
 }
 async function ensureAuthReady(){
+  if(typeof navigator !== 'undefined' && navigator.onLine === false) return;
   try{ await Promise.race([authReadyPromise, cmccTimeout(4000)]); }catch(e){}
 }
 
@@ -712,20 +725,20 @@ const Store = {
     return null;
   },
   async set(key, value){
-    let ok = false;
+    let saved = false, synced = false;
     try{
       await ensureAuthReady();
       if(fsReady && window.__cmccBookRef){
         await window.__cmccBookRef.set({[key]: value}, {merge:true});
         fsCache[key] = value;
-        ok = true;
+        synced = true;
       }
     }catch(e){}
     try{
       localStorage.setItem(STORE_PREFIX + key, value);
-      ok = true;
+      saved = true;
     }catch(e){}
-    return ok;
+    return {ok: saved || synced, saved, synced};
   }
 };
 
@@ -1423,7 +1436,7 @@ document.addEventListener('paste', e=>{
 let saveTimer = null;
 function scheduleSave(){
   clearTimeout(saveTimer);
-  document.getElementById('saveState').textContent = '保存中…';
+  document.getElementById('saveText').textContent = (navigator.onLine === false) ? 'オフライン中…' : '保存中…';
   saveTimer = setTimeout(saveCurrentHole, 500);
 }
 
@@ -1434,10 +1447,16 @@ async function saveCurrentHole(){
       shapes: shapes,
       legacyImage: legacyImage || null
     };
-    await Store.set(`hole-${current}`, JSON.stringify(data));
-    document.getElementById('saveState').textContent = '保存済み';
+    const result = await Store.set(`hole-${current}`, JSON.stringify(data));
+    if(result && result.synced){
+      document.getElementById('saveText').textContent = '保存済み';
+    } else if(result && result.saved){
+      document.getElementById('saveText').textContent = 'オフライン保存済み（電波復帰後に同期）';
+    } else {
+      document.getElementById('saveText').textContent = '保存できませんでした';
+    }
   }catch(e){
-    document.getElementById('saveState').textContent = '';
+    document.getElementById('saveText').textContent = '';
   }
 }
 
@@ -1472,7 +1491,7 @@ async function loadHole(n){
   undoStack = [];
   selectedShapeId = null;
   document.getElementById('notes').value = '';
-  document.getElementById('saveState').textContent = '';
+  document.getElementById('saveText').textContent = '';
 
   let restoredNotes = '';
   shapes = [];
@@ -1732,6 +1751,21 @@ document.getElementById('btnImport').addEventListener('change', (e)=>{
 
 setActiveToolButton('btnTShape');
 loadHole(1);
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  });
+}
+
+function updateNetBadge(){
+  const el = document.getElementById('netBadge');
+  if(!el) return;
+  el.textContent = (navigator.onLine === false) ? '📡 オフライン' : '';
+}
+window.addEventListener('online', updateNetBadge);
+window.addEventListener('offline', updateNetBadge);
+updateNetBadge();
 </script>
 
 </body>
