@@ -1217,7 +1217,10 @@ function endDraw(){
   drawing = false;
 
   if(tool === 'select'){
-    if(selectDragShape) scheduleSave();
+    if(selectDragShape){
+      syncControlsToSelection();
+      scheduleSave();
+    }
     selectDragMode = null;
     selectDragShape = null;
     selectDragStartPos = null;
