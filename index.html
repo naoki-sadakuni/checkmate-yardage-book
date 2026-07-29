@@ -243,18 +243,18 @@
   @media (max-width:820px){ .cols{grid-template-columns:1fr;} }
   @media (max-width:680px){
     html, body{
-      overflow-x:hidden;
+      overflow:hidden;
       width:100%;
-      height:100%;
+      height:100dvh;
     }
-    .frame{ max-width:100%; width:100%; min-width:0; height:100dvh; }
-    .frame > div{ min-width:0; height:100%; }
+    .frame{ max-width:100%; width:100%; min-width:0; height:100dvh; overflow:hidden; }
+    .frame > div{ min-width:0; height:100%; overflow:hidden; }
     .top{ padding:8px 12px 6px; flex-shrink:0; }
     .top-title{ font-size:15px; }
     .stat-strip{ display:none; }
     .howto{ display:none; }
 
-    .body-row{ flex-direction:row; min-width:0; width:100%; flex:1; min-height:0; }
+    .body-row{ flex-direction:row; min-width:0; width:100%; flex:1; min-height:0; overflow:hidden; }
     .rail{
       width:52px;
       flex-shrink:0;
@@ -325,7 +325,7 @@
     .page > div[style*="margin-top:20px"]{
       flex:1;
       min-height:0;
-      max-height:48vh;
+      max-height:58vh;
       display:flex;
       flex-direction:column;
       margin-top:0 !important;
@@ -336,8 +336,8 @@
     #sketch{
       flex:1;
       min-height:0;
-      width:94%;
-      height:94%;
+      width:97%;
+      height:97%;
       aspect-ratio:unset;
       object-fit:contain;
       margin:0 auto;
