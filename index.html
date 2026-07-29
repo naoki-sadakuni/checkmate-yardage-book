@@ -582,15 +582,14 @@
           <div class="hole-head">
             <div class="hole-num" id="holeNum">1</div>
             <div class="badge par" id="badgePar">PAR 5</div>
-            <div class="badge hdcp" id="badgeHdcp">HDCP 9</div>
             <div class="badge yd" id="badgeFB">FB 549Y</div>
             <div class="badge yd" id="badgeB">B 519Y</div>
           </div>
 
           <div style="margin-top:20px;">
             <div class="canvas-tools">
-              <button id="btnLine" title="直線">／ 直線</button>
-              <button id="btnTShape" title="T字（着弾点の左右ブレ幅）">⊥ T字</button>
+              <button id="btnLine" title="直線">／</button>
+              <button id="btnTShape" title="T字（着弾点の左右ブレ幅）">⊥</button>
               <label style="font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:3px;">
                 幅<input type="number" id="tWidth" value="100" min="6" max="200" step="2" style="width:44px;padding:2px 4px;border:1px solid var(--line);border-radius:4px;">
               </label>
@@ -1053,7 +1052,6 @@ async function loadHole(n){
   updateRailActive();
   document.getElementById('holeNum').textContent = h.n;
   document.getElementById('badgePar').textContent = 'PAR ' + h.par;
-  document.getElementById('badgeHdcp').textContent = 'HDCP ' + h.hdcp;
   document.getElementById('badgeFB').textContent = 'FB ' + h.fb + 'Y';
   document.getElementById('badgeB').textContent = 'B ' + h.b + 'Y';
 
