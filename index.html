@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>チェックメイトカントリークラブ｜手作りヤーデージブック</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -325,7 +325,7 @@
     .page > div[style*="margin-top:20px"]{
       flex:1;
       min-height:0;
-      max-height:58vh;
+      max-height:62vh;
       display:flex;
       flex-direction:column;
       margin-top:0 !important;
@@ -347,7 +347,8 @@
     /* Notes and controls: kept, but minimized since illustration is the focus */
     .notes-area{ margin-top:6px; flex-shrink:0; }
     .notes-area .panel-title{ display:none; }
-    .notes-area textarea{ min-height:34px; font-size:11px; padding:6px 8px; }
+    .notes-area textarea{ height:34px; min-height:0; font-size:16px; padding:6px 8px; }
+    #tWidth, #iconSize{ font-size:16px; }
     .save-state{ font-size:10px; height:auto; margin-top:2px; }
 
     #prevHole, #nextHole, #btnExport, #btnImportTrigger, .print-btn{ display:none !important; }
