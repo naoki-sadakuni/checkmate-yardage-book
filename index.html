@@ -267,7 +267,7 @@
       padding:6px 0;
       border-right:1px solid var(--line);
       border-bottom:none;
-      gap:2px;
+      gap:7px;
     }
     .rail-group-label{
       padding:4px 0 2px 0;
@@ -284,7 +284,7 @@
       margin:0 2px 0 auto;
       border-radius:6px;
       border:1px solid var(--line);
-      padding:5px 0;
+      padding:7px 0;
       display:flex;
       flex-direction:column;
       align-items:center;
@@ -348,10 +348,7 @@
     .notes-area textarea{ min-height:34px; font-size:11px; padding:6px 8px; }
     .save-state{ font-size:10px; height:auto; margin-top:2px; }
 
-    .toolbar-bottom{ flex-direction:column; align-items:stretch; gap:6px; margin-top:8px; flex-shrink:0; }
-    .nav-btns{ flex-wrap:wrap; justify-content:flex-start; gap:6px; }
-    .nav-btns button{ flex:1 1 auto; padding:6px 8px; font-size:11px; }
-    .print-btn{ display:none; }
+    .toolbar-bottom{ display:none; }
   }
   .panel-title{
     font-size:12px;
@@ -589,6 +586,7 @@
           <div style="margin-top:20px;">
             <div class="canvas-tools">
               <button id="btnDrawMode" title="ONの間だけイラストへの書き込みができます。OFFの間は触れても書き込まれません（スワイプでのホール移動もOFFの時のみ有効）">描画OFF</button>
+              <button id="btnSelect" title="図形を選択して移動・拡大縮小・色変更・削除">選択</button>
               <button id="btnLine" title="直線">／</button>
               <button id="btnTShape" title="T字（着弾点の左右ブレ幅）">⊥</button>
               <label style="font-size:11px;color:var(--ink-soft);display:flex;align-items:center;gap:3px;">
@@ -603,6 +601,7 @@
               <button class="swatch" data-color="#E8B93A" style="background:#E8B93A;"></button>
               <button class="swatch" data-color="#B8231E" style="background:#B8231E;"></button>
               <button id="btnUndo">戻す</button>
+              <button id="btnDelete" title="選択中の図形を削除">削除</button>
               <button id="btnReset">リセット</button>
             </div>
             <canvas id="sketch" width="520" height="560"></canvas>
@@ -610,7 +609,7 @@
 
           <div class="notes-area">
             <p class="panel-title">メモ（グリーン形状・ハザードまでの距離・攻め方など）</p>
-            <textarea id="notes" placeholder="例）グリーン手前池、残り140から先はキャリー必要／セカンド右OB注意 など"></textarea>
+            <textarea id="notes"></textarea>
             <div class="save-state" id="saveState"></div>
           </div>
 
@@ -794,7 +793,7 @@ function svgMarkup(h){
 
 let current = 1;
 let penColor = '#241F17';
-let tool = 'tshape'; // 'line' | 'tshape' | 'star' | 'circle'
+let tool = 'tshape'; // 'select' | 'line' | 'tshape' | 'star' | 'circle'
 let tShapeWidth = 100;
 let iconSizeScale = 2; // percent of max(canvas.width, canvas.height)
 let drawing = false;
@@ -803,6 +802,20 @@ let lastX = 0, lastY = 0;
 let lineStartX = 0, lineStartY = 0;
 let lineSnapshot = null;
 let undoStack = [];
+
+// Vector shape model: each hole's annotations are a list of editable
+// shape objects instead of a single flattened bitmap. Old-format saves
+// (a single PNG "sketch") are kept as a frozen, non-editable background
+// called legacyImage so nothing already drawn is lost.
+let shapes = [];
+let selectedShapeId = null;
+let legacyImage = null;
+let legacyImageEl = null;
+let legacyImageSrc = null;
+let baseIllustrationImg = null;
+let selectDragMode = null; // null | 'move' | 'p1' | 'p2' | 'resize'
+let selectDragShape = null;
+let selectDragStartPos = null;
 
 const rail = document.getElementById('rail');
 function buildRail(){
@@ -868,7 +881,7 @@ clearCanvasVisual();
 
 function pushUndo(){
   try{
-    undoStack.push(canvas.toDataURL('image/png'));
+    undoStack.push(JSON.stringify({shapes: shapes, legacyImage: legacyImage}));
     if(undoStack.length > 15) undoStack.shift();
   }catch(e){}
 }
@@ -886,49 +899,272 @@ function getPos(e){
   return {x:(clientX-rect.left)*scaleX, y:(clientY-rect.top)*scaleY};
 }
 
-function drawStarPath(cx, cy, outerR, innerR, spikes){
+function drawStarPath(targetCtx, cx, cy, outerR, innerR, spikes){
   let rot = -Math.PI / 2;
   const step = Math.PI / spikes;
-  ctx.beginPath();
-  ctx.moveTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
+  targetCtx.beginPath();
+  targetCtx.moveTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
   for(let i = 0; i < spikes; i++){
     rot += step;
-    ctx.lineTo(cx + Math.cos(rot) * innerR, cy + Math.sin(rot) * innerR);
+    targetCtx.lineTo(cx + Math.cos(rot) * innerR, cy + Math.sin(rot) * innerR);
     rot += step;
-    ctx.lineTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
+    targetCtx.lineTo(cx + Math.cos(rot) * outerR, cy + Math.sin(rot) * outerR);
   }
-  ctx.closePath();
+  targetCtx.closePath();
 }
 
-function stampIcon(kind, x, y){
+function makeShapeId(){
+  return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+}
+
+function createIconShape(kind, x, y){
   const size = Math.max(canvas.width, canvas.height) * (iconSizeScale / 100);
+  return {id: makeShapeId(), type: kind, x, y, size, color: penColor};
+}
+
+// Draws one shape's permanent geometry onto any 2D context (the live
+// canvas or an offscreen one used for printing). Selection highlighting
+// is handled separately since printed output never has a selection.
+function paintShape(targetCtx, s){
+  targetCtx.save();
+  targetCtx.strokeStyle = s.color;
+  targetCtx.fillStyle = s.color;
+  if(s.type === 'line'){
+    targetCtx.lineWidth = 1.4;
+    targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(s.x1, s.y1);
+    targetCtx.lineTo(s.x2, s.y2);
+    targetCtx.stroke();
+  } else if(s.type === 'tshape'){
+    const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const perpX = -uy, perpY = ux;
+    const halfW = (s.width || 100) / 2;
+    targetCtx.lineWidth = 1.4;
+    targetCtx.lineCap = 'round';
+    targetCtx.beginPath();
+    targetCtx.moveTo(s.x1, s.y1);
+    targetCtx.lineTo(s.x2, s.y2);
+    targetCtx.stroke();
+    targetCtx.beginPath();
+    targetCtx.moveTo(s.x2 - perpX * halfW, s.y2 - perpY * halfW);
+    targetCtx.lineTo(s.x2 + perpX * halfW, s.y2 + perpY * halfW);
+    targetCtx.stroke();
+  } else if(s.type === 'star'){
+    drawStarPath(targetCtx, s.x, s.y, s.size, s.size * 0.45, 5);
+    targetCtx.fill();
+  } else if(s.type === 'circle'){
+    targetCtx.lineWidth = s.size * 0.18;
+    targetCtx.beginPath();
+    targetCtx.arc(s.x, s.y, s.size * 0.7, 0, Math.PI * 2);
+    targetCtx.stroke();
+  }
+  targetCtx.restore();
+}
+
+function drawHandleDot(x, y){
   ctx.save();
-  if(kind === 'star'){
-    ctx.fillStyle = penColor;
-    drawStarPath(x, y, size, size * 0.45, 5);
-    ctx.fill();
-  } else if(kind === 'circle'){
-    ctx.strokeStyle = penColor;
-    ctx.lineWidth = size * 0.18;
+  ctx.fillStyle = '#2F6FD6';
+  ctx.beginPath();
+  ctx.arc(x, y, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSelectionOverlay(s){
+  ctx.save();
+  ctx.strokeStyle = '#2F6FD6';
+  ctx.setLineDash([4,3]);
+  ctx.lineWidth = 1;
+  if(s.type === 'line' || s.type === 'tshape'){
     ctx.beginPath();
-    ctx.arc(x, y, size * 0.7, 0, Math.PI * 2);
+    ctx.moveTo(s.x1, s.y1);
+    ctx.lineTo(s.x2, s.y2);
     ctx.stroke();
+    ctx.setLineDash([]);
+    drawHandleDot(s.x1, s.y1);
+    drawHandleDot(s.x2, s.y2);
+  } else {
+    const r = (s.size || 20) * 0.95;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    drawHandleDot(s.x + r, s.y);
   }
   ctx.restore();
+}
+
+function drawAllShapes(){
+  for(const s of shapes){
+    paintShape(ctx, s);
+    if(s.id === selectedShapeId) drawSelectionOverlay(s);
+  }
+}
+
+// Repaints the whole visible canvas: background (either the frozen
+// legacy raster from before this upgrade, or the hole's plain
+// illustration) followed by every editable shape on top.
+function renderCanvasFull(){
+  if(legacyImage){
+    if(legacyImageEl && legacyImageSrc === legacyImage && legacyImageEl.complete){
+      clearCanvasVisual();
+      ctx.drawImage(legacyImageEl, 0, 0, canvas.width, canvas.height);
+      drawAllShapes();
+    } else {
+      const img = new Image();
+      legacyImageSrc = legacyImage;
+      img.onload = () => {
+        legacyImageEl = img;
+        if(legacyImageSrc === legacyImage){
+          clearCanvasVisual();
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          drawAllShapes();
+        }
+      };
+      img.src = legacyImage;
+    }
+  } else {
+    clearCanvasVisual();
+    if(baseIllustrationImg) ctx.drawImage(baseIllustrationImg, 0, 0, canvas.width, canvas.height);
+    drawAllShapes();
+  }
+}
+
+function distToSegment(px, py, x1, y1, x2, y2){
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSq = dx*dx + dy*dy;
+  let t = lenSq ? ((px-x1)*dx + (py-y1)*dy) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t*dx, cy = y1 + t*dy;
+  return Math.hypot(px-cx, py-cy);
+}
+
+function hitTestShapes(x, y){
+  const threshold = Math.max(canvas.width, canvas.height) * 0.02 + 6;
+  for(let i = shapes.length - 1; i >= 0; i--){
+    const s = shapes[i];
+    if(s.type === 'line' || s.type === 'tshape'){
+      if(distToSegment(x, y, s.x1, s.y1, s.x2, s.y2) <= threshold) return s;
+      if(s.type === 'tshape'){
+        const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx/len, uy = dy/len;
+        const perpX = -uy, perpY = ux;
+        const halfW = (s.width || 100) / 2;
+        const bx1 = s.x2 - perpX*halfW, by1 = s.y2 - perpY*halfW;
+        const bx2 = s.x2 + perpX*halfW, by2 = s.y2 + perpY*halfW;
+        if(distToSegment(x, y, bx1, by1, bx2, by2) <= threshold) return s;
+      }
+    } else if(s.type === 'star' || s.type === 'circle'){
+      const r = Math.max((s.size || 1) * 0.9, threshold);
+      if(Math.hypot(x - s.x, y - s.y) <= r) return s;
+    }
+  }
+  return null;
+}
+
+function hitTestHandle(s, p){
+  const R = Math.max(canvas.width, canvas.height) * 0.025 + 8;
+  if(s.type === 'line' || s.type === 'tshape'){
+    if(Math.hypot(p.x - s.x1, p.y - s.y1) <= R) return 'p1';
+    if(Math.hypot(p.x - s.x2, p.y - s.y2) <= R) return 'p2';
+  } else if(s.type === 'star' || s.type === 'circle'){
+    const r = (s.size || 20) * 0.95;
+    const hx = s.x + r, hy = s.y;
+    if(Math.hypot(p.x - hx, p.y - hy) <= R) return 'resize';
+  }
+  return null;
+}
+
+function applySelectDrag(shape, mode, startPos, curPos){
+  if(mode === 'move'){
+    const dx = curPos.x - startPos.x, dy = curPos.y - startPos.y;
+    if(shape.type === 'line' || shape.type === 'tshape'){
+      shape.x1 += dx; shape.y1 += dy; shape.x2 += dx; shape.y2 += dy;
+    } else {
+      shape.x += dx; shape.y += dy;
+    }
+    return curPos;
+  } else if(mode === 'p1'){
+    shape.x1 = curPos.x; shape.y1 = curPos.y;
+    return startPos;
+  } else if(mode === 'p2'){
+    shape.x2 = curPos.x; shape.y2 = curPos.y;
+    return startPos;
+  } else if(mode === 'resize'){
+    shape.size = Math.max(4, Math.hypot(curPos.x - shape.x, curPos.y - shape.y) / 0.95);
+    return startPos;
+  }
+  return startPos;
+}
+
+// After selecting (or newly placing) a shape, reflect its current
+// color/size in the toolbar controls so they don't show stale values.
+function syncControlsToSelection(){
+  const sel = shapes.find(s => s.id === selectedShapeId);
+  if(!sel) return;
+  if(sel.color){
+    penColor = sel.color;
+    document.querySelectorAll('.swatch').forEach(sw => sw.classList.toggle('active', sw.dataset.color === sel.color));
+  }
+  if(sel.type === 'star' || sel.type === 'circle'){
+    const pct = Math.round((sel.size / Math.max(canvas.width, canvas.height)) * 1000) / 10;
+    iconSizeScale = pct;
+    document.getElementById('iconSize').value = pct;
+  } else if(sel.type === 'tshape'){
+    tShapeWidth = sel.width || 100;
+    document.getElementById('tWidth').value = tShapeWidth;
+  }
 }
 
 function startDraw(e){
   if(!drawModeOn) return;
   e.preventDefault();
+  const p = getPos(e);
+
+  if(tool === 'select'){
+    const sel = shapes.find(s => s.id === selectedShapeId) || null;
+    const handleHit = sel ? hitTestHandle(sel, p) : null;
+    if(sel && handleHit){
+      pushUndo();
+      selectDragMode = handleHit;
+      selectDragShape = sel;
+      selectDragStartPos = p;
+      drawing = true;
+      return;
+    }
+    const hit = hitTestShapes(p.x, p.y);
+    if(hit){
+      pushUndo();
+      selectedShapeId = hit.id;
+      selectDragMode = 'move';
+      selectDragShape = hit;
+      selectDragStartPos = p;
+      drawing = true;
+      syncControlsToSelection();
+    } else {
+      selectedShapeId = null;
+      drawing = false;
+    }
+    renderCanvasFull();
+    return;
+  }
+
   pushUndo();
   drawing = true;
-  const p = getPos(e);
   lastX = p.x; lastY = p.y;
   lineStartX = p.x; lineStartY = p.y;
   if(tool === 'line' || tool === 'tshape'){
     lineSnapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
   } else if(tool === 'star' || tool === 'circle'){
-    stampIcon(tool, p.x, p.y);
+    const shape = createIconShape(tool, p.x, p.y);
+    shapes.push(shape);
+    selectedShapeId = shape.id;
+    syncControlsToSelection();
+    renderCanvasFull();
     scheduleSave();
   }
 }
@@ -936,6 +1172,14 @@ function moveDraw(e){
   if(!drawing) return;
   e.preventDefault();
   const p = getPos(e);
+
+  if(tool === 'select'){
+    if(!selectDragShape || !selectDragMode) return;
+    selectDragStartPos = applySelectDrag(selectDragShape, selectDragMode, selectDragStartPos, p);
+    renderCanvasFull();
+    return;
+  }
+
   if(tool === 'line'){
     ctx.putImageData(lineSnapshot, 0, 0);
     ctx.strokeStyle = penColor;
@@ -945,6 +1189,7 @@ function moveDraw(e){
     ctx.moveTo(lineStartX, lineStartY);
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
+    lastX = p.x; lastY = p.y;
   } else if(tool === 'tshape'){
     ctx.putImageData(lineSnapshot, 0, 0);
     const dx = p.x - lineStartX, dy = p.y - lineStartY;
@@ -963,12 +1208,34 @@ function moveDraw(e){
     ctx.moveTo(p.x - perpX * halfW, p.y - perpY * halfW);
     ctx.lineTo(p.x + perpX * halfW, p.y + perpY * halfW);
     ctx.stroke();
+    lastX = p.x; lastY = p.y;
   }
   // star/circle tools ignore drag movement — they stamp once on mousedown
 }
 function endDraw(){
   if(!drawing) return;
   drawing = false;
+
+  if(tool === 'select'){
+    if(selectDragShape) scheduleSave();
+    selectDragMode = null;
+    selectDragShape = null;
+    selectDragStartPos = null;
+    return;
+  }
+
+  if(tool === 'line' || tool === 'tshape'){
+    const dist = Math.hypot(lastX - lineStartX, lastY - lineStartY);
+    if(dist > 3){
+      const shape = (tool === 'line')
+        ? {id: makeShapeId(), type: 'line', x1: lineStartX, y1: lineStartY, x2: lastX, y2: lastY, color: penColor}
+        : {id: makeShapeId(), type: 'tshape', x1: lineStartX, y1: lineStartY, x2: lastX, y2: lastY, width: tShapeWidth, color: penColor};
+      shapes.push(shape);
+      selectedShapeId = shape.id;
+    }
+    renderCanvasFull();
+  }
+
   lineSnapshot = null;
   scheduleSave();
 }
@@ -997,64 +1264,112 @@ document.querySelectorAll('.swatch').forEach(sw=>{
     document.querySelectorAll('.swatch').forEach(s=>s.classList.remove('active'));
     sw.classList.add('active');
     penColor = sw.dataset.color;
+    const sel = shapes.find(s => s.id === selectedShapeId);
+    if(sel){
+      pushUndo();
+      sel.color = penColor;
+      renderCanvasFull();
+      scheduleSave();
+    }
   });
 });
 function setActiveToolButton(id){
-  ['btnLine','btnTShape','btnStar','btnCircle'].forEach(bid=>{
+  ['btnSelect','btnLine','btnTShape','btnStar','btnCircle'].forEach(bid=>{
     document.getElementById(bid).classList.toggle('active-tool', bid === id);
   });
 }
+document.getElementById('btnSelect').addEventListener('click', ()=>{ tool = 'select'; setActiveToolButton('btnSelect'); });
 document.getElementById('btnLine').addEventListener('click', ()=>{ tool = 'line'; setActiveToolButton('btnLine'); });
 document.getElementById('btnTShape').addEventListener('click', ()=>{ tool = 'tshape'; setActiveToolButton('btnTShape'); });
 document.getElementById('btnStar').addEventListener('click', ()=>{ tool = 'star'; setActiveToolButton('btnStar'); });
 document.getElementById('btnCircle').addEventListener('click', ()=>{ tool = 'circle'; setActiveToolButton('btnCircle'); });
 document.getElementById('tWidth').addEventListener('input', (e)=>{
   const v = parseInt(e.target.value, 10);
-  if(!isNaN(v) && v > 0) tShapeWidth = v;
+  if(!isNaN(v) && v > 0){
+    tShapeWidth = v;
+    const sel = shapes.find(s => s.id === selectedShapeId);
+    if(sel && sel.type === 'tshape'){
+      sel.width = v;
+      renderCanvasFull();
+      scheduleSave();
+    }
+  }
 });
 document.getElementById('iconSize').addEventListener('input', (e)=>{
   const v = parseFloat(e.target.value);
-  if(!isNaN(v) && v > 0) iconSizeScale = v;
+  if(!isNaN(v) && v > 0){
+    iconSizeScale = v;
+    const sel = shapes.find(s => s.id === selectedShapeId);
+    if(sel && (sel.type === 'star' || sel.type === 'circle')){
+      sel.size = Math.max(canvas.width, canvas.height) * (v / 100);
+      renderCanvasFull();
+      scheduleSave();
+    }
+  }
 });
 document.getElementById('btnUndo').addEventListener('click', ()=>{
   const prev = undoStack.pop();
-  if(prev){
-    const img = new Image();
-    img.onload = ()=>{ clearCanvasVisual(); ctx.drawImage(img,0,0,canvas.width,canvas.height); scheduleSave(); };
-    img.src = prev;
-  }
+  if(!prev) return;
+  try{
+    const state = JSON.parse(prev);
+    shapes = state.shapes || [];
+    legacyImage = state.legacyImage || null;
+    legacyImageEl = null; legacyImageSrc = null;
+    selectedShapeId = null;
+    renderCanvasFull();
+    scheduleSave();
+  }catch(e){}
+});
+document.getElementById('btnDelete').addEventListener('click', ()=>{
+  if(!selectedShapeId) return;
+  pushUndo();
+  shapes = shapes.filter(s => s.id !== selectedShapeId);
+  selectedShapeId = null;
+  renderCanvasFull();
+  scheduleSave();
+});
+document.addEventListener('keydown', (e)=>{
+  if(e.key !== 'Delete' && e.key !== 'Backspace') return;
+  const activeTag = document.activeElement && document.activeElement.tagName;
+  if(activeTag === 'TEXTAREA' || activeTag === 'INPUT') return;
+  if(!selectedShapeId) return;
+  e.preventDefault();
+  document.getElementById('btnDelete').click();
 });
 document.getElementById('btnReset').addEventListener('click', ()=>{
   if(!confirm('このホールの書き込みを消去して、元のイラストに戻します。よろしいですか？')) return;
   pushUndo();
-  const h = HOLES.find(x=>x.n===current);
-  seedIllustrationToCanvas(h, scheduleSave);
+  shapes = [];
+  legacyImage = null;
+  legacyImageEl = null; legacyImageSrc = null;
+  selectedShapeId = null;
+  renderCanvasFull();
+  scheduleSave();
 });
 
 function drawImageToCanvas(imgSrc){
   pushUndo();
   const img = new Image();
   img.onload = ()=>{
-    clearCanvasVisual();
+    const off = document.createElement('canvas');
+    off.width = canvas.width; off.height = canvas.height;
+    const octx = off.getContext('2d');
+    octx.fillStyle = '#FBF7EC';
+    octx.fillRect(0, 0, off.width, off.height);
     const cw = canvas.width, ch = canvas.height;
     const ir = img.width/img.height, cr = cw/ch;
     let dw,dh,dx,dy;
     if(ir > cr){ dw = cw; dh = cw/ir; dx = 0; dy = (ch-dh)/2; }
     else { dh = ch; dw = ch*ir; dx = (cw-dw)/2; dy = 0; }
-    ctx.drawImage(img, dx, dy, dw, dh);
+    octx.drawImage(img, dx, dy, dw, dh);
+    legacyImage = off.toDataURL('image/png');
+    legacyImageEl = null; legacyImageSrc = null;
+    shapes = [];
+    selectedShapeId = null;
+    renderCanvasFull();
     scheduleSave();
   };
   img.src = imgSrc;
-}
-
-function seedIllustrationToCanvas(h, onDone){
-  prepareCanvasForHole(h, (img) => {
-    clearCanvasVisual();
-    if(img){
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    }
-    if(onDone) onDone();
-  });
 }
 
 canvas.addEventListener('dragover', e=>{ e.preventDefault(); });
@@ -1106,7 +1421,8 @@ async function saveCurrentHole(){
   try{
     const data = {
       notes: document.getElementById('notes').value,
-      sketch: canvas.toDataURL('image/png')
+      shapes: shapes,
+      legacyImage: legacyImage || null
     };
     await Store.set(`hole-${current}`, JSON.stringify(data));
     document.getElementById('saveState').textContent = '保存済み';
@@ -1132,34 +1448,37 @@ async function loadHole(n){
   document.getElementById('badgeB').textContent = 'B ' + h.b + 'Y';
 
   undoStack = [];
+  selectedShapeId = null;
   document.getElementById('notes').value = '';
   document.getElementById('saveState').textContent = '';
 
   let restoredNotes = '';
-  let restoredSketch = null;
+  shapes = [];
+  legacyImage = null;
+  legacyImageEl = null; legacyImageSrc = null;
   try{
     const res = await Store.get(`hole-${n}`);
     if(res && res.value){
       const data = JSON.parse(res.value);
       restoredNotes = data.notes || '';
-      restoredSketch = data.sketch || null;
+      if(Array.isArray(data.shapes)){
+        shapes = data.shapes;
+        legacyImage = data.legacyImage || null;
+      } else if(data.sketch){
+        // Pre-upgrade save: the whole hand-drawn picture was one flattened
+        // image. Keep it visible as a frozen background; only shapes
+        // drawn from now on are individually selectable/editable.
+        legacyImage = data.sketch;
+      }
     }
   }catch(e){}
 
   document.getElementById('notes').value = restoredNotes;
 
-  if(restoredSketch){
-    prepareCanvasForHole(h, () => {
-      const img = new Image();
-      img.onload = ()=>{
-        clearCanvasVisual();
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      };
-      img.src = restoredSketch;
-    });
-  } else {
-    seedIllustrationToCanvas(h);
-  }
+  prepareCanvasForHole(h, (img) => {
+    baseIllustrationImg = img;
+    renderCanvasFull();
+  });
 }
 
 document.getElementById('prevHole').addEventListener('click', ()=>{
@@ -1223,6 +1542,52 @@ function renderHoleCard(h, imgMap, missingLabel, rotate, notesMap){
   `;
 }
 
+function loadImageAsync(src){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// Rasterizes one hole's illustration + editable shapes into a single
+// image for printing, since a printed card needs one flat picture.
+async function renderHoleToDataURL(h, holeShapes, holeLegacyImage){
+  let w = canvas.width || 520, hh = canvas.height || 560;
+  let baseImg = null;
+  const illustSrc = HOLE_IMG[h.n];
+  if(illustSrc){
+    try{
+      baseImg = await loadImageAsync(illustSrc);
+      let iw = baseImg.naturalWidth || baseImg.width, ih = baseImg.naturalHeight || baseImg.height;
+      const maxDim = Math.max(iw, ih);
+      if(maxDim > MAX_CANVAS_DIM){
+        const scale = MAX_CANVAS_DIM / maxDim;
+        iw = Math.round(iw * scale); ih = Math.round(ih * scale);
+      }
+      w = iw; hh = ih;
+    }catch(e){}
+  }
+  const off = document.createElement('canvas');
+  off.width = w; off.height = hh;
+  const octx = off.getContext('2d');
+  octx.fillStyle = '#FBF7EC';
+  octx.fillRect(0, 0, w, hh);
+  if(holeLegacyImage){
+    try{
+      const limg = await loadImageAsync(holeLegacyImage);
+      octx.drawImage(limg, 0, 0, w, hh);
+    }catch(e){}
+  } else if(baseImg){
+    octx.drawImage(baseImg, 0, 0, w, hh);
+  }
+  for(const s of (holeShapes || [])){
+    paintShape(octx, s);
+  }
+  return off.toDataURL('image/png');
+}
+
 async function getEffectiveData(baseMap){
   const images = Object.assign({}, baseMap);
   const notes = {};
@@ -1231,8 +1596,12 @@ async function getEffectiveData(baseMap){
       const res = await Store.get(`hole-${h.n}`);
       if(res && res.value){
         const data = JSON.parse(res.value);
-        if(data.sketch) images[h.n] = data.sketch;
         if(data.notes) notes[h.n] = data.notes;
+        if(Array.isArray(data.shapes) && (data.shapes.length || data.legacyImage)){
+          images[h.n] = await renderHoleToDataURL(h, data.shapes, data.legacyImage || null);
+        } else if(data.sketch){
+          images[h.n] = data.sketch;
+        }
       }
     }catch(e){}
   }
@@ -1308,7 +1677,7 @@ async function resetAllToIllustration(){
         const data = JSON.parse(res.value);
         notes = data.notes || '';
       }
-      await Store.set(`hole-${h.n}`, JSON.stringify({notes, sketch: ''}));
+      await Store.set(`hole-${h.n}`, JSON.stringify({notes, shapes: [], legacyImage: null}));
     }catch(e){}
   }
   await loadHole(current);
