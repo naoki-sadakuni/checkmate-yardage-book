@@ -240,6 +240,62 @@
     gap:18px;
   }
   @media (max-width:820px){ .cols{grid-template-columns:1fr;} }
+  @media (max-width:680px){
+    .frame{ max-width:100%; }
+    .top{ padding:16px 16px 12px; }
+    .top-title{ font-size:20px; }
+    .stat-strip{ gap:6px; }
+    .stat{ padding:6px 10px; min-width:64px; }
+    .stat b{ font-size:14px; }
+    .howto{ padding:10px 12px; font-size:12px; margin-top:12px; }
+
+    .body-row{ flex-direction:column; }
+    .rail{
+      width:100%;
+      display:flex;
+      flex-direction:row;
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+      padding:10px 8px;
+      border-right:none;
+      border-bottom:1px solid var(--line);
+      gap:6px;
+    }
+    .rail-group-label{
+      padding:0 8px;
+      display:flex;
+      align-items:center;
+      flex-shrink:0;
+      white-space:nowrap;
+    }
+    .tab{
+      flex-shrink:0;
+      width:auto;
+      margin:0;
+      border-radius:8px;
+      border-right:1px solid var(--line);
+      padding:8px 12px;
+    }
+    .tab.active{ width:auto; }
+
+    .page-wrap{ padding:14px 12px 40px; }
+    .page{ padding:16px 14px 20px; }
+
+    .hole-head{ gap:10px; }
+    .hole-num{ font-size:36px; }
+    .badge{ font-size:11px; padding:4px 8px; }
+
+    table.yard th, table.yard td{ padding:6px 4px; font-size:12px; }
+    table.yard td.val{ font-size:14px; }
+
+    .illust-box{ max-width:100%; }
+    #sketch{ max-width:100%; }
+
+    .toolbar-bottom{ flex-direction:column; align-items:stretch; gap:10px; }
+    .nav-btns{ flex-wrap:wrap; justify-content:flex-start; }
+    .nav-btns button{ flex:1 1 auto; }
+    .print-btn{ width:100%; text-align:center; }
+  }
   .panel-title{
     font-size:12px;
     letter-spacing:.06em;
