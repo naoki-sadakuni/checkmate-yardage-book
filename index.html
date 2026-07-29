@@ -351,7 +351,7 @@
     /* Notes and controls: kept, but minimized since illustration is the focus */
     .notes-area{ margin-top:6px !important; flex-shrink:0; }
     .notes-area .panel-title{ display:none; }
-    .notes-area textarea{ height:34px; min-height:0; font-size:16px; padding:6px 8px; }
+    .notes-area textarea{ min-height:34px; font-size:11px; padding:6px 8px; resize:none; }
     #tWidth, #iconSize{ font-size:16px; }
     .save-state{ font-size:10px; height:auto; margin-top:2px; }
 
@@ -576,7 +576,7 @@
 <div class="frame">
   <div style="flex:1;display:flex;flex-direction:column;">
     <div class="top">
-      <p class="top-title">チェックメイト カントリークラブ</p>
+      <p class="top-title">Checkmate Country Club</p>
     </div>
 
     <div class="body-row">
@@ -1441,7 +1441,19 @@ async function saveCurrentHole(){
   }
 }
 
-document.getElementById('notes').addEventListener('input', scheduleSave);
+function autosizeNotes(){
+  const ta = document.getElementById('notes');
+  if(!ta) return;
+  ta.style.height = 'auto';
+  const maxH = Math.max(60, Math.round(window.innerHeight * 0.28));
+  const needed = ta.scrollHeight;
+  const h = Math.min(needed, maxH);
+  ta.style.height = h + 'px';
+  ta.style.overflowY = needed > maxH ? 'auto' : 'hidden';
+}
+document.getElementById('notes').addEventListener('input', ()=>{ scheduleSave(); autosizeNotes(); });
+window.addEventListener('resize', autosizeNotes);
+window.addEventListener('orientationchange', ()=>setTimeout(autosizeNotes, 100));
 
 let hasLoadedOnce = false;
 async function loadHole(n){
@@ -1484,6 +1496,7 @@ async function loadHole(n){
   }catch(e){}
 
   document.getElementById('notes').value = restoredNotes;
+  autosizeNotes();
 
   prepareCanvasForHole(h, (img) => {
     baseIllustrationImg = img;
