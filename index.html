@@ -582,9 +582,273 @@
     flex-shrink:0;
     overflow:hidden;
   }
+  body.locked .frame{ display:none !important; }
+  #lockScreen{ display:none; }
+  body.locked #lockScreen{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    position:fixed;
+    inset:0;
+    background:var(--paper);
+    z-index:9999;
+    padding:24px;
+  }
+  .lock-card{
+    max-width:340px;
+    width:100%;
+    text-align:center;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:32px 24px;
+    box-shadow:var(--shadow);
+  }
+  .lock-icon{ font-size:36px; margin-bottom:8px; }
+  .lock-title{
+    font-family:'Fraunces',serif;
+    font-weight:700;
+    font-size:19px;
+    color:var(--pine);
+    margin:0 0 6px;
+  }
+  .lock-sub{
+    font-size:13px;
+    color:var(--ink-soft);
+    margin:0 0 20px;
+  }
+  .lock-card button{
+    font-family:'Inter',sans-serif;
+    font-size:14px;
+    font-weight:600;
+    padding:12px 18px;
+    border-radius:10px;
+    border:1px solid var(--fairway);
+    background:var(--fairway);
+    color:#fff;
+    cursor:pointer;
+    width:100%;
+    margin-bottom:10px;
+  }
+  .lock-card button:hover{ opacity:0.92; }
+  .lock-card button.secondary{
+    background:var(--card);
+    color:var(--fairway);
+  }
+  #pinArea{ margin-top:6px; }
+  #pinInput{
+    width:100%;
+    box-sizing:border-box;
+    font-size:20px;
+    letter-spacing:0.3em;
+    text-align:center;
+    padding:10px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    margin-bottom:10px;
+    font-family:'IBM Plex Mono',monospace;
+  }
+  .lock-link{
+    font-size:12px;
+    color:var(--hazard);
+    text-decoration:underline;
+    cursor:pointer;
+    margin-top:6px;
+  }
+  .lock-error{
+    font-size:12px;
+    color:#B8231E;
+    min-height:16px;
+    margin-top:8px;
+  }
 </style>
 </head>
-<body>
+<body class="locked">
+<div id="lockScreen">
+  <div class="lock-card">
+    <div class="lock-icon">⛳</div>
+    <p class="lock-title">Checkmate Country Club</p>
+    <p class="lock-sub" id="lockStatus">確認中…</p>
+    <button id="btnFaceSetup" style="display:none;">このスマホを登録</button>
+    <button id="btnFaceUnlock" style="display:none;">Face ID / 指紋で開く</button>
+    <div id="pinArea" style="display:none;">
+      <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" placeholder="4〜6桁のPIN">
+      <button id="btnPinSubmit">開く</button>
+    </div>
+    <p class="lock-link" id="pinFallbackLink" style="display:none;">PINを使う</p>
+    <p class="lock-error" id="lockError"></p>
+  </div>
+</div>
+<script>
+(function(){
+  const LS_CRED = 'cmcc_webauthn_cred_id';
+  const LS_PIN = 'cmcc_pin_hash';
+
+  const elStatus = document.getElementById('lockStatus');
+  const elSetup = document.getElementById('btnFaceSetup');
+  const elUnlock = document.getElementById('btnFaceUnlock');
+  const elPinArea = document.getElementById('pinArea');
+  const elPinInput = document.getElementById('pinInput');
+  const elPinSubmit = document.getElementById('btnPinSubmit');
+  const elPinFallbackLink = document.getElementById('pinFallbackLink');
+  const elError = document.getElementById('lockError');
+
+  function showError(msg){ elError.textContent = msg || ''; }
+
+  function unlockApp(){
+    document.body.classList.remove('locked');
+  }
+
+  function base64urlToBuffer(base64url){
+    const padding = '='.repeat((4 - base64url.length % 4) % 4);
+    const base64 = (base64url + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const buf = new Uint8Array(raw.length);
+    for(let i=0;i<raw.length;i++) buf[i] = raw.charCodeAt(i);
+    return buf.buffer;
+  }
+
+  async function sha256Hex(text){
+    const enc = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  function webauthnSupported(){
+    return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+  }
+
+  async function platformAuthAvailable(){
+    if(!webauthnSupported()) return false;
+    try{
+      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    }catch(e){ return false; }
+  }
+
+  function showPinSetupMode(isSetup){
+    elSetup.style.display = 'none';
+    elUnlock.style.display = 'none';
+    elPinFallbackLink.style.display = 'none';
+    elPinArea.style.display = 'block';
+    elStatus.textContent = isSetup ? '新しいPINを設定してください' : 'PINを入力してください';
+    elPinInput.value = '';
+    elPinSubmit.textContent = isSetup ? '設定して開く' : '開く';
+    elPinInput.focus();
+  }
+
+  async function doFaceSetup(){
+    showError('');
+    elSetup.disabled = true;
+    try{
+      const cred = await navigator.credentials.create({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { name: 'Checkmate Country Club Yardage Book' },
+          user: {
+            id: crypto.getRandomValues(new Uint8Array(16)),
+            name: 'cmcc-yardage-user',
+            displayName: 'CMCC Yardage'
+          },
+          pubKeyCredParams: [
+            { type:'public-key', alg:-7 },
+            { type:'public-key', alg:-257 }
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment:'platform',
+            userVerification:'required',
+            residentKey:'preferred'
+          },
+          timeout: 60000,
+          attestation:'none'
+        }
+      });
+      localStorage.setItem(LS_CRED, cred.id);
+      unlockApp();
+    }catch(e){
+      showError('登録に失敗しました。もう一度お試しいただくか、PINをご利用ください。');
+    }finally{
+      elSetup.disabled = false;
+    }
+  }
+
+  async function doFaceUnlock(){
+    showError('');
+    elUnlock.disabled = true;
+    const credId = localStorage.getItem(LS_CRED);
+    try{
+      await navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          allowCredentials: [{ id: base64urlToBuffer(credId), type:'public-key' }],
+          userVerification:'required',
+          timeout: 60000
+        }
+      });
+      unlockApp();
+    }catch(e){
+      showError('認証に失敗しました。もう一度お試しください。');
+    }finally{
+      elUnlock.disabled = false;
+    }
+  }
+
+  async function doPinSubmit(){
+    showError('');
+    const val = (elPinInput.value || '').trim();
+    if(!/^[0-9]{4,6}$/.test(val)){
+      showError('4〜6桁の数字で入力してください。');
+      return;
+    }
+    const storedHash = localStorage.getItem(LS_PIN);
+    const hash = await sha256Hex(val);
+    if(!storedHash){
+      localStorage.setItem(LS_PIN, hash);
+      unlockApp();
+    }else if(hash === storedHash){
+      unlockApp();
+    }else{
+      showError('PINが正しくありません。');
+      elPinInput.value = '';
+      elPinInput.focus();
+    }
+  }
+
+  elSetup.addEventListener('click', doFaceSetup);
+  elUnlock.addEventListener('click', doFaceUnlock);
+  elPinSubmit.addEventListener('click', doPinSubmit);
+  elPinInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doPinSubmit(); });
+  elPinFallbackLink.addEventListener('click', ()=> showPinSetupMode(!localStorage.getItem(LS_PIN)));
+
+  (async function init(){
+    const credId = localStorage.getItem(LS_CRED);
+    const pinHash = localStorage.getItem(LS_PIN);
+
+    if(credId){
+      elStatus.textContent = 'このスマホで登録済みです';
+      elUnlock.style.display = 'block';
+      if(!pinHash){
+        elPinFallbackLink.textContent = 'PINを設定して使う';
+        elPinFallbackLink.style.display = 'block';
+      }
+      return;
+    }
+    if(pinHash){
+      showPinSetupMode(false);
+      return;
+    }
+    // First-time use on this device/browser.
+    const available = await platformAuthAvailable();
+    if(available){
+      elStatus.textContent = 'このスマホをFace ID/指紋で登録してください';
+      elSetup.style.display = 'block';
+      elPinFallbackLink.textContent = '代わりにPINを使う';
+      elPinFallbackLink.style.display = 'block';
+    }else{
+      showPinSetupMode(true);
+    }
+  })();
+})();
+</script>
 <div id="printRoot"></div>
 <div class="frame">
   <div style="flex:1;display:flex;flex-direction:column;">

@@ -3,7 +3,7 @@
 // (e.g. out on the course). Firestore's own offline persistence handles
 // the note/drawing data separately; this only covers the app itself.
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = 'cmcc-ybk-' + CACHE_VERSION;
 
 const APP_SHELL = [
