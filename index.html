@@ -974,11 +974,15 @@ const Store = {
         if(Object.prototype.hasOwnProperty.call(fsCache, key)){
           return {key, value: fsCache[key]};
         }
-        const snap = await window.__cmccBookRef.get();
-        if(snap.exists){
-          fsCache = snap.data() || {};
-          if(Object.prototype.hasOwnProperty.call(fsCache, key)){
-            return {key, value: fsCache[key]};
+        // Guard against Firestore's get() hanging with no signal: race it
+        // against a timeout so navigation never gets stuck offline.
+        if(navigator.onLine !== false){
+          const snap = await Promise.race([window.__cmccBookRef.get(), cmccTimeout(4000)]);
+          if(snap && snap.exists){
+            fsCache = snap.data() || {};
+            if(Object.prototype.hasOwnProperty.call(fsCache, key)){
+              return {key, value: fsCache[key]};
+            }
           }
         }
       }
@@ -991,17 +995,27 @@ const Store = {
   },
   async set(key, value){
     let saved = false, synced = false;
-    try{
-      await ensureAuthReady();
-      if(fsReady && window.__cmccBookRef){
-        await window.__cmccBookRef.set({[key]: value}, {merge:true});
-        fsCache[key] = value;
-        synced = true;
-      }
-    }catch(e){}
+    // Save locally first and immediately so hole-switching/saving never
+    // waits on the network, online or off.
     try{
       localStorage.setItem(STORE_PREFIX + key, value);
       saved = true;
+    }catch(e){}
+    try{
+      await ensureAuthReady();
+      if(fsReady && window.__cmccBookRef && navigator.onLine !== false){
+        // Firestore's write promise only resolves once the server
+        // acknowledges it, which never happens with no signal. Race it
+        // against a timeout so this can't block navigation; the write
+        // still gets queued by Firestore's own offline cache regardless.
+        const writePromise = window.__cmccBookRef.set({[key]: value}, {merge:true});
+        const result = await Promise.race([writePromise.then(()=>'ok'), cmccTimeout(4000)]);
+        writePromise.catch(()=>{});
+        if(result === 'ok'){
+          fsCache[key] = value;
+          synced = true;
+        }
+      }
     }catch(e){}
     return {ok: saved || synced, saved, synced};
   }
